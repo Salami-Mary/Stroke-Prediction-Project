@@ -1,0 +1,923 @@
+---
+title: "STROKE PREDICTION"
+author: "mary"
+date: "2023-03-19"
+output:
+  html_document:
+    theme: journal
+    toc: yes
+    toc_float: yes
+    code_folding: show
+    highlight: espresso
+  pdf_document:
+    toc: yes
+editor_options:
+  markdown:
+    wrap: 72
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo =TRUE,warning=FALSE,comment= NA)
+```
+
+# Introduction
+
+The aim of this project is to use machine learning to predict wheather
+or not a patient will have storke or not. The dataset was pulled from
+[Kaggle]('<https://www.kaggle.com/datasets/fedesoriano/stroke-prediction-dataset>').The
+dataset was originally collected by the WHO (world health organisation )
+lets import the necessary libraries we will be using from the begining
+to the end.
+
+```{r,warning=FALSE,message=FALSE}
+library(tidymodels)
+library(tidyverse)
+library(glmnet)
+library(modeldata)
+library(ggthemes)
+library(janitor)
+library(dplyr)
+library(naniar)
+library(caTools)
+library(vip)
+library(skimr)
+library(recipes)
+library(themis)
+library(corrplot)
+tidymodels_prefer()
+```
+
+# Why do we need to predict stroke
+
+According to the World Health Organization (WHO) stroke is the 2nd
+leading cause of death globally, responsible for approximately 11% of
+total deaths. This dataset consist of different parameters that ccan
+contribute to patient prone to stroke. I picked this dataset becasue of
+my interest in medical AI. stroke, also known as a cerebrovascular
+accident (CVA), is a medical emergency that occurs when the blood supply
+to the brain is interrupted or reduced, depriving brain cells of oxygen
+and nutrients. This can cause brain cells to die or become damaged,
+leading to various neurological deficits, such as paralysis, difficulty
+speaking, or cognitive impairment.The main type of stroke are the 
+ischemic and hemorrhagic.
+
+Ischemic strokes occur when a blood vessel supplying blood to the brain
+is blocked, usually by a blood clot. This is the most common type of
+stroke, accounting for around 87% of all cases. The most common causes
+of ischemic stroke include atherosclerosis (the buildup of plaque in the
+arteries), heart disease, high blood pressure, diabetes, and smoking.
+
+Hemorrhagic strokes occur when a blood vessel in the brain ruptures,
+causing bleeding in or around the brain. This type of stroke is less
+common, accounting for around 13% of all cases. The most common causes
+of hemorrhagic stroke include high blood pressure, brain aneurysms (weak
+spots in the blood vessel wall), and arteriovenous malformations (AVMs),
+which are abnormal tangles of blood vessels in the brain.
+
+Other risk factors that can increase the likelihood of stroke include
+age (the risk of stroke increases with age), family history of stroke,
+previous stroke or transient ischemic attack (TIA), obesity, sedentary
+lifestyle, alcohol abuse, and use of certain medications, such as birth
+control pills and blood thinners.
+
+Most of the risk factors that increases the chances in huaman are
+present in our dataset.
+
+![an image caption Source: Dana Foundation
+3.](/Users/iderasalami/Documents/PSTAT%20231/FINAL%20PROJECT/fs-stroke.jpeg)
+Now, we understand what "stroke" means, lets start!
+
+
+# Project Workflow
+
+In order to construct an efficient binary classification model, the following procedures will be utilized. Our first step is to investigate the dataset through visualization so that we can comprehend each variable's coverage in the data. Second, we will clean up the data by identifying missing variables and inconclusive terms that could influence our prediction. The variables will then be used to predict whether or not a patient will experience a stroke. We will run a training and test split on the data, develop a recipe, and set the folds for the 10 fold cross validation that we will implement.. To model the training data, we will utilize binary classification models such as Logisitic Regression, Boostedtrees, Random Forest, and K nearest neighbors. Once the findings of each model have been acquired, they will be applied to the test set to measure their accuracy in predicting stroke. In addition, we will visually represent the metrics and confusion matrix of the best model for the test dataset.
+
+# Exploratory Data Analysis
+
+Before We proceed on the data modelling, we need to deal with data
+quality issues by manipulating the data ,dealing with missing values and
+exploring relationships. The dataset contains 5110 rows and 12 columns
+.The dataset consist of the following variables
+
+-   id: unique identifier
+
+-   gender: "Male", "Female" or "Other"
+
+-   age: age of the patient
+
+-   hypertension: 0 if the patient doesn't have hypertension, 1 if the
+    patient has hypertension heart_disease: 0 if the patient doesn't
+    have any
+
+-   heart diseases, 1 if the patient has a heart disease
+
+-   ever_married: "No" or "Yes" work_type: "children", "Govt_jov",
+    "Never_worked", "Private" or "Self-employed" Residence_type: "Rural"
+    or "Urban"
+
+-   avg_glucose_level: average glucose level in blood;less than 5.6
+    mmol/L is normal. A fasting blood sugar level from 5.6 to 6.9 mmol/L
+    is considered prediabetes. if it is (7 mmol/L) this means the
+    patient has diabetes
+
+-   bmi: body mass index;8 or lower: underweight. 18.5 to 24.9: normal,
+    healthy weight. 25 to 29.9:
+
+-   overweight. 30 or higher: obese.
+
+-   smoking_status: "formerly smoked", "never smoked", "smokes" or
+    "Unknown"\* in smoking_status means that the information is
+    unavailable for this patient
+
+-   stroke: 1 if the patient had a stroke or 0 if not
+
+## Reading Dataset
+
+```{r}
+data<-read.csv('/Users/iderasalami/Documents/PSTAT 231/FINAL PROJECT/stroke-data.csv',header=TRUE)%>% #reading the csv file
+  clean_names() # clean  the column header 
+```
+
+```{r}
+dim(data)
+```
+
+we have 5110 observations and 12 columns
+```{r}
+
+data <- data %>%
+  mutate(smoking_status = factor(smoking_status),
+         stroke = factor(ifelse(stroke == 1, "yes", "no"), levels = c("yes", "no"))) %>% 
+  select(-id)
+```
+
+We convert the smoking status to a factor variable and specifying the
+yes as 1 anad "no" as 0 , we also removed the id column since this
+doesnot contribute to stroke risk or attributes.
+
+```{r}
+sum(is.na(data))
+```
+
+From the above result the bmi as other ' N/A'  makes impossible to
+see the sum of na values. I will replace the N/A with na to know the
+true missing values.
+
+```{r}
+data <- data %>%
+  replace_with_na_all(condition = ~.x == "N/A")
+```
+
+We just replaced the na so we can be able to work with the na values
+easily
+
+```{r}
+data$heart_disease<-as.factor(data$heart_disease) #convert to factor variable
+data$hypertension<-as.factor(data$hypertension)
+data$gender<-as.factor(data$gender)
+data$work_type<-as.factor(data$work_type)
+data$residence_type<-as.factor(data$residence_type)
+data$ever_married<-as.factor(data$ever_married)
+data$bmi <-as.double(data$bmi)
+
+```
+
+# Visual EDA
+
+Lets visualize the variables and explore the relationship between the
+parameters
+
+## Gender distribution
+
+```{r}
+data%>%
+  ggplot(aes(gender))+
+  geom_bar(color = "black",fill="blue")+
+  theme_bw()
+```
+
+The female records are higher than the male. Also, we have "other"
+samples which is very low, we will later remove this in the later
+section of this project.
+
+```{r cars}
+data%>%
+  ggplot(aes(work_type))+
+  geom_bar(fill='blue')+
+  theme_bw()
+```
+
+The number of patients that works in the private sector is higher than
+the other categories
+
+## Smoking Status
+```{r}
+data%>%
+  ggplot(aes(smoking_status))+
+  geom_bar(fill='red')+
+  theme_bw()
+```
+
+We have "Unknown" in the smoking status, which leads to many questions
+like who are the ones that fill unknown, was this filled by the adults
+or children.We will deal with this later in the project section.
+
+## BMI/AGE
+
+```{r,warning=FALSE}
+library(ggplot2)
+ggplot(data, aes(avg_glucose_level, bmi)) +
+  geom_point(aes(color = age), alpha = 0.6, size = 1) +
+  scale_fill_brewer(palette = "Set1", direction = -1) +
+  guides() +
+  xlab("avg glucose level")
+```
+
+Apart from getting bmi having missing values, there is outliers in the
+bmi. From the visualisation, there are many patients that seems to have
+higheer bmi which is far off from the other points
+
+## Relationship between Target and Other Variables
+
+### Residence type
+
+```{r,warning=FALSE,message=FALSE}
+data %>% 
+  dplyr::select(stroke,residence_type) %>%
+  group_by(stroke, residence_type) %>%
+  summarise(nCount = n()) %>%
+  mutate(percent = nCount/sum(nCount) * 100) %>% 
+  
+  ggplot(aes(x = stroke, y = percent, fill = residence_type)) +
+  geom_bar(stat = 'identity')+
+  labs(
+    x = 'Stroke',
+    y = 'Percent (%)'
+  ) +
+  theme(
+    panel.border = element_blank(),
+    panel.grid = element_blank()
+  ) +
+  geom_text(aes(label = paste(round(percent, 2), '%')), position = position_stack(vjust = 0.5))
+  
+```
+
+From the diagram, we can see that the percentage of of people in urban
+area with stroke is 54/% and the percentage iof people with stroke in
+the rurall area is rural area with stroke is 45% which signifies that
+the number of people with stroke in the urban area is higher than the
+rural areas . we can tell from this that it does makes sense we can
+attribute the urban area life to this health issues, the daily stress,
+pollution and everything attached with living the urban life.
+
+### Work Type
+
+```{r,message=FALSE}
+
+data %>% 
+  dplyr::select(stroke,work_type) %>%
+  group_by(stroke, work_type) %>%
+  summarise(nCount = n()) %>%
+  mutate(percent = nCount/sum(nCount) * 100) %>% 
+  
+  ggplot(aes(x = stroke, y = percent, fill = work_type)) +
+  geom_bar(stat = 'identity')+
+  labs(
+    x = 'Stroke',
+    y = 'Percent (%)'
+  ) +
+  theme(
+    panel.border = element_blank(),
+    panel.grid = element_blank()
+  ) +
+  geom_text(aes(label = paste(round(percent, 2), '%')), position = position_stack(vjust = 0.5))
+  
+
+```
+
+The private work type contributes more to stroke compare to others. On
+the other hand, we have the childen,whose data is not fully represented.
+We will deal with this later on in the tidying model section.
+
+### Age
+
+```{r}
+ggplot(data, aes(factor(stroke), age)) +
+  geom_boxplot() + 
+  #geom_jitter(alpha = 0.1) +
+  xlab("stroke")
+```
+The likelihood of suffering a stroke in life increases with age. From the previous diagram, we can see that because strokes are so uncommon, children cannot even be included in any risk factors. The visualisations makes sense, demonstrating that the risk of stroke at the lower age between 0-35, is very low and close to impossible but as the age breaks out of this loop then stroke risk gets higher.
+
+### Smoking Status
+
+```{r}
+library(ggplot2)
+data %>%
+  ggplot(aes(x = smoking_status, fill = stroke)) +
+  geom_bar()
+  
+```
+###  Correlation 
+```{r,warning=FALSE}
+data %>% 
+  select(is.numeric) %>% #selecting the numeric columns
+  cor(use = "complete.obs") %>% 
+  corrplot(type = "lower", diag = T)
+```
+
+We can infer that the numerical variables are negatively connected from the correlation plot above.
+
+# Tidying the data
+
+After exploring the data, there is a need for cleaning the dataset. We
+can notice that we have the NAs in the bmi variable and the "unknown" in
+the smoking status.
+
+```{r}
+data %>% filter(is.na(bmi)) %>%  #select the na values and group by stroke categories 
+  group_by(stroke) %>% 
+  count()
+```
+
+We can see that the na values for bmi falls more in the no and with our
+"no" on the higher part of the target we can remove thena values
+
+```{r}
+data <- data %>%
+  replace_with_na_all(condition = ~.x == "Unknown")
+```
+
+Lets replace the unknown with na to be able to manipulate easily
+
+```{r,results='asis'}
+data <- data %>% filter(gender != "Other")
+skim(data) %>%
+  yank("numeric")
+```
+
+Now that we have a bmi to deal with for our missing data, let's investigate how to handle the unknown variable we had in the smoking status. Lets use the age to get more information about the the "unknown variable
+in the data.
+
+```{r}
+data %>% filter(work_type == "children") %>% 
+  group_by(smoking_status) %>% 
+  summarise(N = n(), 
+            avg.age = mean(age), 
+            max.age = max(age), 
+            min.age = min(age))
+```
+
+The unknowns we have in the smoking status are all children. so we can
+impute the unknown as never smoked so with this,lets replace all nas in
+the smoking status as "never smoked"
+
+```{r}
+library(tidyr)
+
+# Replace missing values in column x with "never smoked"
+data <- data %>%
+  replace_na(list(smoking_status = "never smoked"))
+```
+
+```{r}
+data %>% filter(work_type == "children") %>% 
+  group_by(smoking_status) %>% 
+  summarise(N = n(), 
+            avg.age = mean(age), 
+            max.age = max(age), 
+            min.age = min(age))
+```
+
+We now have an aggregate of 672 for never smoked after we discovered the
+"unknowns" as children
+
+### Missing data visual
+
+```{r}
+library(naniar)
+vis_miss(data)
+```
+
+We only have 0.4 % of the missing values in bmi we can drop the na
+values here
+
+```{r}
+data <- data %>% drop_na()
+```
+
+```{r,results='asis'}
+sum(is.na(data))
+```
+
+Yayy! Now that we have a clean dataset to use for training, we should check in with our response variable to see the proportion if the dataset is unbalanced.
+
+## Target Variable
+
+Lets check on our target variable
+
+```{r}
+# calculate the proportion of stroke values
+prop_stroke <- data %>% 
+  count(stroke) %>% 
+  mutate(prop_stroke = n / sum(n))
+
+# view the proportion of stroke values
+prop_stroke
+```
+
+Ouch! From the above, we can see that the target is highly imbalance and
+we will be dealing with this by using a machine learning method called
+"upsampling" method to increase the number of yes class. We will deal
+with this in our training data section.
+
+# Setting up Model
+
+In this section, we will be setting up for our model building by
+splitting the data, building recipe and 10 folds validation
+
+## Data Splitting, Imputation, Up-sampling  and Recipe
+
+```{r}
+set.seed(3431)
+data_split <- initial_split(data,prop=0.70, strata = "stroke") #splitting the data
+
+data_train <- training(data_split)
+data_test <- testing(data_split)
+
+dim(data_train)
+```
+
+We divided the dataset into 30% for testing and 70% for training. To guarantee the same distribution throughout the subsets, we stratified our target variable, "stroke." After dividing, we have 1473 rows for testing and 3435 rows for training.
+
+```{r}
+dim(data_test)
+```
+
+# Buiding Recipe
+
+One of the most important step in preprocessubg data is building a
+recipe. We will be using all our variables as our predictor, recall in
+the introduction section which we discussed variables that contributes
+to patient risk to stroke, this shows the importance of each variables
+in our dataset. In addition, dummy code the categorical variables which
+are age,gebder,smoking status and normalize all the predictors.Also,
+since wee are dealing with imbalance target variable , we will be using
+the upscaling method to balance the variable.
+
+```{r}
+data_recipe <- recipe(stroke ~ ., data = data_train) %>%
+  step_dummy(all_nominal_predictors()) %>%
+  step_zv(all_predictors()) %>%
+  step_normalize(all_predictors()) %>% 
+  step_upsample(stroke, over_ratio = 0.5) 
+```
+
+Now, we are sure of having 10 predictors and one outcome whcih will be
+our target. Lets build model to determine if a patient will have stroke
+or not
+
+Now, We have zero missisng value for the training data
+
+# K-Fold Cross Validation
+
+We'll stratify our cross validation on our target variable, Stroke , as
+well as use 10 folds to perform stratifies cross validation.
+
+```{r}
+data_folds <- vfold_cv(data_train, v = 10, strata = "stroke")
+```
+
+# Model Building Workflow
+
+The setting up of workflow is the same with all the models except from
+the KNN. The following steps were strictly followed :
+
+1.  Set up the model by specifying the engine and the mode, we specified
+    classification since this fit so well with out goal.
+
+2.  Set up the workflow of the model, and add our stroke
+    recipe(data_recipe) We will then skip the step 3-5 for our KNN since
+    it is a simpler model that doesn't need to be tuned
+
+3.   Set up the tunning grid with parameters that we want tuned and
+    number of levels of tuning for each parameter
+
+4.   Yayy! we will tune the model with hyper-parameter
+
+5.   Select the most accurate from tuning grid to finalize it with the
+    workflow
+
+6.   Fit the model with the stroke trainig dataset 7. Save the model as
+    RDA file
+
+7.   Load the model and fit with the stroke testing set.
+
+## Model Outcomes
+
+The model training longer time to train, since we are working with
+bigger dataset.Now, we have the models, lets load it in and see  its
+performance.
+
+### Loading the models
+
+```{r}
+load("/Users/iderasalami/Documents/FINAL PROJECT REPORT/stroke_gb.rda")
+load("/Users/iderasalami/Documents/FINAL PROJECT REPORT/stroke_rf.rda")
+load("/Users/iderasalami/Documents/FINAL PROJECT REPORT/knn_fit.rda")
+load("/Users/iderasalami/Documents/FINAL PROJECT REPORT/stroke_log.rda")
+```
+
+```{r}
+save(dtrf_class, file = "stroke_rf.rda")
+save(lr_res, file = "stroke_log.rda")
+save(knn_fit, file = "knn_fit.rda")
+save(tune_bt_class, file = "stroke_gb.rda")
+```
+
+# Interpreting the Model with Visuals
+
+One of the most useful tools for visualizing the results of models that
+have been tuned is the autoplot function in r. This will visualize the
+effects that the change in certain parameters has on our metric of
+choice, roc_auc.
+
+## Logistic Regression
+
+Logistic regression is a type of classification algorithm that uses a
+logistic function to model the relationship between the predictor
+variables and the probability of the binary outcome.The logistic
+function takes any input value and transforms it into a value between 0
+and 1. It classifies the observation if it is greater than 0.5 as
+positive, otherwise as negative class. ![an image caption Source: AI
+Geek.](/Users/iderasalami/Documents/Grad%20Mat/GRAD%20MAT/UCSB/Logistic-Regression-for-binary-classification.jpeg)
+
+As shown below, we can see that the roc_auc logistic regression did
+pretty well, lets look forward to its performance on the training set
+
+```{r}
+autoplot(lr_res)
+```
+
+## Random Forest
+
+Random Forest is a supervised learning algorithm that can be used for
+classification. It predicts the class label of a given input based on
+the majority vote of the classes predicted by multiple decision
+trees.The idea behind Random Forest is to grow multiple decision trees,
+each on a random subset of the original data and features, and then
+aggregate the predictions of these trees to make a final prediction. The
+randomly selected mtry is 6 , the accuracy increases at each node. In Random Forest, the key hyperparameters
+that control the performance and complexity of the model include: This
+is better than Logistic regressio, Lets see the result with Boosted
+trees
+
+```{r}
+autoplot(dtrf_class) + theme_minimal()
+```
+
+## Boosted Trees
+
+A sort of ensemble learning technique called "boosted trees" for classification issues combines several decision trees to provide a more reliable and accurate model for predicting categorical outcomes. It then assesses the first tree's errors before fitting a second decision tree to the first tree's residuals. A new tree is fitted to the residuals of the previous trees each time, and this procedure is repeated for a certain number of trees. By combining all of the ensemble's trees' predictions, the final conclusion is reached. The final prediction is obtained by obtaining the majority vote (for classification) of the predictions from all the trees. Each tree provides a prediction based on the input features. Boosted Trees construct the trees in a sequential manner, whereas Random Forests construct the trees individually and then aggregate their predictions at the conclusion.  In the diagram below, Gradient boost performance looks better than the random forest.
+
+![
+.](/Users/iderasalami/Documents/Grad%20Mat/gradient_bos0st.png)
+
+
+```{r}
+autoplot(tune_bt_class) + theme_minimal()
+```
+
+```{r,include=FALSE}
+lr_recipe <- data_recipe %>% 
+  step_corr(all_predictors(), threshold = 0.75)
+
+
+lr_mod <- logistic_reg(penalty = tune(), mixture = 1) %>% 
+  set_engine("glmnet")
+
+
+lr_workflow <- 
+  workflow() %>% 
+  add_model(lr_mod) %>% 
+  add_recipe(lr_recipe)
+
+lr_reg_grid <- tibble(penalty = 10**seq(-4, 0, length.out = 30))
+
+
+lr_res <- tune_grid(lr_workflow,
+              grid = lr_reg_grid,
+              resamples = data_folds,
+              control = control_grid(save_pred = TRUE),
+              metrics = metric_set(roc_auc))
+
+
+```
+
+```{r,include=FALSE}
+#save(lr_res, file = "stroke_log.rda")
+```
+
+```{r,include=FALSE}
+#load("stroke_gb.rda")
+```
+
+```{r,include=FALSE}
+show_best(lr_res, n = 1)
+best_log <- select_best(lr_res)
+```
+
+```{r,include=FALSE}
+stroke_pelog <- finalize_workflow(lr_workflow, best_log) %>% 
+  fit(data_train)
+```
+
+```{r,include=FALSE}
+knn <- nearest_neighbor( neighbors = 5)%>%
+  set_engine("kknn")%>%
+  set_mode("classification")
+
+knn_wrkflow<- workflow()%>%
+  add_model(knn)%>%
+  add_recipe(data_recipe)
+
+knn_fit <- fit (knn_wrkflow,data_train)
+```
+
+```{r,include=FALSE}
+gbdt_spec <- boost_tree(mtry = tune(), 
+                           trees = tune(), 
+                           learn_rate = tune()) %>%
+  set_engine("xgboost") %>% 
+  set_mode("classification")
+
+gb_class_wf <- workflow() %>% 
+  add_model(gbdt_spec) %>% 
+  add_recipe(data_recipe)
+```
+
+```{r,include=FALSE}
+bt_grid <- grid_regular(mtry(range = c(1, 6)), 
+                        trees(range = c(200, 600)),
+                        learn_rate(range = c(-10, -1)),
+                        levels = 5)
+
+```
+
+```{r,eval=FALSE,include=FALSE}
+tune_bt_class <- tune_grid(
+  gb_class_wf,
+  resamples = data_folds,
+  grid = bt_grid
+)
+```
+
+```{r,include=FALSE}
+
+autoplot(tune_bt_class) + theme_minimal()
+```
+
+```{r,include=FALSE}
+show_best(tune_bt_class, n = 1)
+best_gb <- select_best(tune_bt_class)
+```
+
+```{r,include=FALSE}
+final_bt_model <- finalize_workflow(gb_class_wf, best_gb)
+final_bt_model <- fit(final_bt_model, data_train)
+```
+
+```{r,include=FALSE}
+final_bt_model %>% extract_fit_parsnip() %>% 
+  vip() +
+  theme_minimal()
+```
+
+```{r,include=FALSE}
+dt_class_spec <- rand_forest(mtry = tune(), 
+                           trees = tune(), 
+                           min_n = tune()) %>%
+  set_engine("ranger",importance = "impurity") %>% 
+  set_mode("classification")
+
+dt_class_wf <- workflow() %>% 
+  add_model(dt_class_spec) %>% 
+  add_recipe(data_recipe)
+```
+
+```{r,include=FALSE}
+rf_grid <- grid_regular(mtry(range = c(1, 8)), 
+                        trees(range = c(200, 600)),
+                        min_n(range = c(10, 20)),
+                        levels= 6)
+
+```
+
+```{r,eval=FALSE,include=FALSE}
+dtrf_class <- tune_grid(
+  dt_class_wf,
+  resamples = data_folds,
+  grid = rf_grid
+)
+```
+
+```{r,include=FALSE}
+#load("stroke_rf.rda")
+```
+
+```{r,echo=FALSE,include=FALSE}
+save(dtrf_class, file = "stroke_rf.rda")
+```
+
+```{r,echo=FALSE,include=FALSE}
+#autoplot(dtrf_class) + theme_minimal()
+```
+
+```{r,message=FALSE,include=FALSE}
+show_best(dtrf_class, n = 1)
+best_rf <- select_best(dtrf_class)
+```
+
+```{r}
+strokerf_fit <- finalize_workflow(dt_class_wf, best_rf)
+strokerf_fit <- fit(strokerf_fit, data_train)
+```
+
+```{r,include=FALSE}
+library(vip)
+
+strokerf_fit %>% extract_fit_parsnip() %>%
+  vip() +
+  theme_minimal()
+```
+
+# Choosing the best model
+
+We will now predict the KNN,Random Forest, Boosted Trees and Logistic model  on the training data and get the roc_auc of each models 
+
+```{r}
+stroke_knn <- predict(knn_fit, new_data= data_train, type ="prob") %>%
+  bind_cols(data_train %>%select(stroke)) %>%
+   roc_auc(stroke, .pred_yes)
+
+stroke_rf_auc<-augment(strokerf_fit, data_train) %>% 
+  select(stroke, starts_with(".pred")) %>% 
+  roc_auc(stroke, .pred_yes)
+
+stroke_boosted_reg_auc<-augment(final_bt_model, data_train) %>% 
+  select(stroke, starts_with(".pred")) %>% 
+  roc_auc(stroke, .pred_yes)
+
+
+stroke_loggr<-augment(stroke_pelog, data_train) %>% 
+  select(stroke, starts_with(".pred")) %>% 
+  roc_auc(stroke, .pred_yes)
+
+
+rocAucTable = bind_rows(
+                       stroke_knn,stroke_rf_auc,stroke_boosted_reg_auc,stroke_loggr)%>%
+  
+                        mutate(.metric = c("KNN","Random Forest","Boosted Trees","Logistic")) %>%
+                        dplyr::select(.metric, .estimate)
+rocAucTable %>%
+  arrange(rocAucTable)
+```
+
+As shown in the tibble. KNN has the overall best ROC AUC score with
+0.9869 with boosted trees behind at 0.918. This is just fitted with the
+training set lets explore the performance of all models with the testing
+set.
+
+```{r,echo=FALSE,include=FALSE}
+show_best(dtrf_class, n = 1)
+best_rf <- select_best(dtrf_class)
+```
+
+```{r,echo=FALSE,include=FALSE}
+final_bt_model_test <- augment(final_bt_model, 
+                               data_test) %>% 
+ select(stroke, starts_with(".pred"))
+```
+
+```{r,echo=FALSE,include=FALSE}
+conf_mat(final_bt_model_test, truth = stroke, 
+        .pred_class) %>% 
+ autoplot(type = "heatmap")
+```
+
+
+# Selecting the best on Test set
+
+```{r}
+stroke_log_test<-augment(stroke_pelog, data_test) %>% 
+  select(stroke, starts_with(".pred")) %>% 
+  roc_auc(stroke, .pred_yes)
+
+test_knn <- predict(knn_fit, new_data= data_test, type ="prob") %>%
+  bind_cols(data_test %>%select(stroke)) %>%
+   roc_auc(stroke, .pred_yes)
+
+stroke_model_test <- augment(strokerf_fit,data_test) %>% 
+  select(stroke, starts_with(".pred"))%>%
+  roc_auc(stroke, .pred_yes)
+
+
+stroke_boosted_test<-augment(final_bt_model, data_test) %>% 
+  select(stroke, starts_with(".pred")) %>% 
+  roc_auc(stroke, .pred_yes)
+
+rocAucTable = bind_rows(test_knn,stroke_model_test,stroke_log_test,stroke_boosted_test) %>%
+                        mutate(.metric = c( "KNN","Random Forest","Logistic Regression","Boosted")) %>%
+                        dplyr::select(.metric, .estimate)
+rocAucTable
+```
+
+
+![
+.](/Users/iderasalami/Documents/Grad Mat/surprised-amazed-shocked-41.gif){width=100%}
+
+WOW! Surprisingly, Logistic Regression performed better when fitted with testing data than when fitted with training data. The boosted tree, which was the second-best performer in the training set, also did well here with a difference of just 0.015. KNN appears to be very different from the others; this could be because the model was not tuned which might not be well generalised like the Logistic.
+
+
+# Logistic Regression
+
+
+```{r}
+augment(stroke_pelog, new_data = data_test) %>%
+  roc_auc(stroke, .pred_yes) 
+  
+```
+Lets explore our best model by checking the variables importance ,as we can see from below diagram ,"age","work_type,self_employed,worktype_private" are the top variable importance in the model.
+
+```{r}
+library(vip)
+
+stroke_pelog %>% extract_fit_parsnip() %>%
+  vip() +
+  theme_minimal()
+```
+
+```{r}
+augment(stroke_pelog, new_data = data_test) %>%
+  roc_curve(stroke, .pred_yes) %>%
+  autoplot()
+
+```
+
+To visualize this result on the test set, we will once plot the ROC curve. We can see it is curved up and this supports the ROC AUC score. Therefore, the Logistic regression did better on the test set comapred to the others. 
+
+# Testing on New Patient Record
+
+We will now test the best-performing model on bad and good samples
+
+## Testing on the Bad Pateient Record
+
+```{r}
+stroke_bad_test_example <- data.frame(
+  age=70,
+  gender= as.factor('Male'),
+  hypertension = as.factor( 1),
+  heart_disease= as.factor( 1),
+  smoking_status =as.factor("smokes"),
+  ever_married = as.factor("Yes"),
+  work_type =as.factor( "Private"),
+  residence_type= as.factor("Urban"),
+  avg_glucose_level=180,
+  bmi=89
+)
+```
+
+
+
+```{r}
+predict(stroke_pelog, stroke_bad_test_example, type = "class")
+```
+From the following result, we can see that the model correctly predicted "yes" based on the input data, taking into account the age, low glucose level, and other characteristics.
+
+
+## Testing on  the Good Patient Record
+
+```{r}
+stroke_good_test_example <- data.frame(
+  age=25,
+  gender= as.factor('Female'),
+  hypertension = as.factor( 0),
+  heart_disease= as.factor( 0),
+  smoking_status =as.factor("never smoked"),
+  ever_married = as.factor("Yes"),
+  work_type =as.factor( "Private"),
+  residence_type= as.factor("Rural"),
+  avg_glucose_level=80,
+  bmi=25
+)
+```
+
+```{r}
+predict(stroke_pelog, stroke_good_test_example, type = "class")
+```
+The model correctly predicted "no" based on the input data, taking into account the age, low glucose level, and other characteristics. This is evident from the above result performed well.
+
+# Conclusion
+
+This project has sliced the stroke prediction problem through research, data manipulation, model development, and implementation. The KNN model performed best on our training set data set. While this model did not do well on the training set, it allowed potential for the other adjusted models to outperform it, namely the Logistic model. For future computations, we can increase the performance of the model by dividing it into a smaller proportion of training data. Also, we might examine additional models, such as SVM and neural network, for improved outcomes. 
+Overall, the ROC AUC metrics yielded a good score, which enabled us to accurately forecast the patient samples. Since this is a health-based use case, additional metrics can be employed to re-evaluate performance. We have reached the end of the project, dont forget health is wealth. 
